@@ -13,7 +13,7 @@ to build the kernel module
 ```
 cd src
 make
-insmod zosbd2.ko
+sudo insmod zosbd2.ko
 ```
 
 to build the sample ramdisk userspace implementation
