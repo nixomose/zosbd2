@@ -86,4 +86,29 @@ this cycle continues until an ioctl is make to the control device to destroy the
 when a block device is destroyed, the kernel module sends a special response to the userspace blocking ioctl saying basically there are no more requests coming and the usrespace program should not call back.
 
 
+# more details
+
+there are a number of caveats and limitations that I'm still working on. it's a work in progress but is perfectly stable so far as I've tested it.
+
+it builds on 32 bit and 64 bit machines.
+
+it runs on raspbian and ubuntu 18.04 and 20.04
+
+I've tested it with the 4.15 kernel and the 5.8 kernel and the 5.10 kernel.
+
+because of the way the sample program is written it can only handle one request at a time.
+all requests from the block device are handled roughly in the order in which they came in.
+
+it is possible to have multiple userspace programs make the ioctl to get requests from the kernel and run them in parallel. I haven't tested this case yet but it is designed to work that way.
+
+the one case where I know this will work less than optimally is that at the moment the kernel module only expects one userspace program to be pulling off the work queue so when it destroys a block device it will only send one go-away request to userspace, and if there are more they will block until the userspace process is killed mnaually. On my list of things to fix.
+
+Another problem has to do with clean shutdown.
+you need to make sure you have sync sync synced everything to the block device before you call destroy on it, there is currently some ambiguity in the kernel module about how many callers are talking to it, so the cleaner way of exiting is disabled at the moment, and all destroy block device requests are forced, if all the data isn't flushed by destroy time, it will be lost.
+
+I'm currently working on another feature to queue multiple small requests from the kernel, for example when the page cache is painfally slowly feeing the kernel module one 4k block at a time so it can batch up the requests and send them to userspace in one shot. this is not completed yet and is disabled at the moment.
+
+
+
+
 
