@@ -76,6 +76,12 @@ the the userspace program makes an ioctl to the newly created block device, and 
 when a request comes in for the block device, the information about the request (is it a read or a write, and if it's a write, what data needs to be written) is returned to the userspace application that was blocking on the ioctl call.
 
 the userspace application then handles the request either collecting the data for read requests or storing the data for write requests, and then calls the ioctl again with the results of the request that was handled.
-the kernel module then sends the results sent from userspace to the block device handler that made the initial request and then blocks again waiting for something else to do.
+
+the kernel module then sends the results sent from userspace to the kernel for the block device that the inital request came from and then blocks again waiting for something else to do.
+
+this cycle continues until an ioctl is make to the control device to destroy the block device.
+
+when a block device is destroyed, the kernel module sends a special response to the userspace blocking ioctl saying basically there are no more requests coming and the usrespace program should not call back.
+
 
 
