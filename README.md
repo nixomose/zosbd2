@@ -66,3 +66,16 @@ that will destroy the block device and the zosbd2_sample_ramdisk process in the 
 
 # how it works
 
+the kernel module once loaded, creates a misc device called `/dev/zosbd2ctl`.
+this device is how userspace applications can make requests to the zosbd2 kernel module to create and destroy block devices. the kernel module supports multiple concurrent block devices.
+
+when the userspace program starts, it sends an ioctl to the control device with information about the size and shape of block device to make.
+the kernel module makes the block device in the kernel, and creates a queue in its memory to hold requests.
+
+the the userspace program makes an ioctl to the newly created block device, and it blocks waiting for something to appear on the queue.
+when a request comes in for the block device, the information about the request (is it a read or a write, and if it's a write, what data needs to be written) is returned to the userspace application that was blocking on the ioctl call.
+
+the userspace application then handles the request either collecting the data for read requests or storing the data for write requests, and then calls the ioctl again with the results of the request that was handled.
+the kernel module then sends the results sent from userspace to the block device handler that made the initial request and then blocks again waiting for something else to do.
+
+
