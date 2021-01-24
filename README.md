@@ -64,5 +64,5 @@ that will destroy the block device and the zosbd2_sample_ramdisk process in the 
 
 
 
-# how it works.
+# how it works
 
