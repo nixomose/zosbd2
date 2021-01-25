@@ -10,7 +10,7 @@ read more about zendemic and the zendemic object store here: http://zendemic.net
 
 # building
 
-to build the kernel module you must have the kernel headers for you running kernel installed.
+to build the kernel module you must have the kernel headers for your running kernel installed.
 
 ubuntu/debian:
 sudo apt install linux-headers-$(uname -r)
