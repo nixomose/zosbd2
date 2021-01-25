@@ -13,13 +13,16 @@ read more about zendemic and the zendemic object store here: http://zendemic.net
 to build the kernel module you must have the kernel headers for your running kernel installed.
 
 ubuntu/debian:
-sudo apt install linux-headers-$(uname -r)
+
+```sudo apt install linux-headers-$(uname -r)```
 
 raspbian:
-sudo apt install raspberrypi-kernel-headers
+
+```sudo apt install raspberrypi-kernel-headers```
 
 fedora:
-sudo yum -y install kernel-devel kernel-headers
+
+```sudo yum -y install kernel-devel kernel-headers```
 
 once the headers are installed, you can build the kernel module
 
