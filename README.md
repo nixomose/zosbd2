@@ -120,7 +120,7 @@ the one case where I know this will work less than optimally is that at the mome
 Another problem has to do with clean shutdown.
 you need to make sure you have sync sync synced everything to the block device before you call destroy on it, there is currently some ambiguity in the kernel module about how many callers are talking to it, so the cleaner way of exiting is disabled at the moment, and all destroy block device requests are forced, if all the data isn't flushed by destroy time, it will be lost.
 
-I'm currently working on another feature to queue multiple small requests from the kernel, for example when the page cache is painfully slowly feeling the kernel module one 4k block at a time so it can batch up the requests and send them to userspace in one shot. this is not completed yet and is disabled at the moment.
+I'm currently working on another feature to queue multiple small requests from the kernel, for example when the page cache is painfully slowly feeding the kernel module one 4k block at a time so it can batch up the requests and send them to userspace in one shot. this is not completed yet and is disabled at the moment.
 
 
 
