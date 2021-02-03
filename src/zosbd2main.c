@@ -629,9 +629,8 @@ static s32 zosbd2_operation_read_response(device_state *device, zosbd2_operation
     return zosbd2_operation_block_for_request(device, userspace); 
   }
 
-static s32 zosbd2_operation_write_response(device_state *device, zosbd2_operation *op, unsigned long __user userspace)
+static s32 zosbd2_operation_write_and_discard_common(int write, device_state *device, zosbd2_operation *op, unsigned long __user userspace)
   {
-
     s32 respond_ret;
     s32 ret;
     zosbd2_context *context_ptr; 
@@ -639,14 +638,14 @@ static s32 zosbd2_operation_write_response(device_state *device, zosbd2_operatio
 
     respond_ret = 0;
 
-    log_user_debug("start zosbd2_operation_write_response");
+    log_user_debug("start zosbd2_operation_%s_response", (write ? "write" : "discard"));
 
     context_ptr = NULL;
     ret = find_context_by_operation_id(device, op->operation_id, &context_ptr);
     if (ret != 0)
       {
 
-        log_user_error(-ENOENT, "Unable to find concurrent operation_id %u to respond to for write_response", op->operation_id);
+        log_user_error(-ENOENT, "Unable to find concurrent operation_id %u to respond to for %s", op->operation_id, (write ? "write" : "discard"));
         log_user_error(-ENOENT, "Will not signal block device thread, because we can't find it.");
 
         goto errornocontext;
@@ -655,26 +654,41 @@ static s32 zosbd2_operation_write_response(device_state *device, zosbd2_operatio
     userspaceerr = op->error; 
     if (userspaceerr != 0)
       {
-        log_kern_error(-EINVAL, "Error returned from userspace in write response. sending error to kernel side: %d", userspaceerr);
+        log_kern_error(-EINVAL, "Error returned from userspace in %s response. sending error to kernel side: %d", (write ? "write" : "discard"), userspaceerr);
         respond_ret = -EINVAL;
         goto error; 
       }
 
-    log_user_debug("data successfully written by userspace: %llu bytes.", op->packet.write_response.response_total_length_of_all_segment_requests_written);
+    if (write)
+      log_user_debug("data successfully written by userspace: %llu bytes.", op->packet.write_response.response_total_length_of_all_segment_requests_written);
+    else
+      log_user_debug("data successfully discarded by userspace: %llu bytes.", op->packet.discard_response.response_total_length_of_all_segment_requests_discarded);
 
     error:
 
     context_ptr->op.error = respond_ret; 
 
-    log_user_debug("broadcasting to response_cv to unblock device thread for write response, and setting triggered flag");
+    log_user_debug("broadcasting to response_cv to unblock device thread for %s response, and setting triggered flag", (write ? "write" : "discard"));
     context_ptr->response_cv_triggered_flag = 1; 
     pil_cv_broadcast(&context_ptr->response_cv);
     log_user_debug("about to unlock response_lock");
     pil_mutex_unlock(&context_ptr->response_lock);
 
     errornocontext:
-    log_user_debug("end zosbd2_operation_write_response, going back to block for another request");
+    log_user_debug("end zosbd2_operation_%s_response, going back to block for another request", (write ? "write" : "discard"));
     return zosbd2_operation_block_for_request(device, userspace);
+  }
+
+static s32 zosbd2_operation_write_response(device_state *device, zosbd2_operation *op, unsigned long __user userspace)
+  {
+
+    return zosbd2_operation_write_and_discard_common(1, device, op, userspace);
+  }
+
+static s32 zosbd2_operation_discard_response(device_state *device, zosbd2_operation *op, unsigned long __user userspace)
+  {
+
+    return zosbd2_operation_write_and_discard_common(0, device, op, userspace);
   }
 
 static s32 ioctl_zosbd2_device_status(struct block_device *bdev, fmode_t mode, unsigned long __user userspace)
@@ -736,6 +750,9 @@ static s32 ioctl_zosbd2_operation(struct block_device *bdev, fmode_t mode, unsig
         break;
       case DEVICE_OPERATION_WRITE_RESPONSE:
         ret = zosbd2_operation_write_response(device, holding_area, userspace);
+        break;
+      case DEVICE_OPERATION_DISCARD_RESPONSE:
+        ret = zosbd2_operation_discard_response(device, holding_area, userspace);
         break;
       default:
         log_user_error(-EINVAL, "Unknown ioctl: %d", operation);
@@ -1017,7 +1034,19 @@ static s32 request_userspace_block_transfer(device_state *device, zosbd2_context
   {
 
     s32 block_ret = 0;
-    if (context->dir == READ)
+    if (context->operation == REQ_OP_DISCARD)
+      {
+        log_kern_debug("starting request userspace block transfer for discard: id: %d, number of segments: %u, total bytes in request: %lld",
+                       context->op.operation_id, context->number_of_segments_in_list, context->total_data_in_all_segments);
+
+        context->op.header.operation = DEVICE_OPERATION_KERNEL_DISCARD_REQUEST;
+        context->op.header.size = context->total_data_in_all_segments;
+        context->op.header.signal_number = 0;
+
+        context->op.packet.discard_request.number_of_segments = context->number_of_segments_in_list;
+        context->op.packet.discard_request.total_length_of_all_bio_segments = context->total_data_in_all_segments;
+      }
+    else if (context->dir == READ)
       {
 
         log_kern_debug("starting request userspace block transfer for read: id: %d, number of segments: %u, total bytes in request: %lld",
@@ -1047,7 +1076,7 @@ static s32 request_userspace_block_transfer(device_state *device, zosbd2_context
       }
     else
       {
-        log_kern_error(-EINVAL, "request userspace block transfer request is not a read or write, dir = %d. Failing request for operation_id: %d",
+        log_kern_error(-EINVAL, "request userspace block transfer request is not a read, write, or discard, dir = %d. Failing request for operation_id: %d",
                        context->dir, context->op.operation_id);
         block_ret = -EIO;
         goto errornolock;
@@ -1134,7 +1163,8 @@ static s32 request_userspace_block_transfer(device_state *device, zosbd2_context
     return block_ret;
   }
 
-static s32 add_bio_segment_to_concurrent_operation_entry(zosbd2_context *context, device_state *device, size_t start_sector, size_t bytes_to_copy, struct page *bv_page, unsigned long offset, u64 counter)
+static s32 add_bio_segment_to_concurrent_operation_entry(zosbd2_context *context, device_state *device, size_t start_sector,
+                                                         size_t bytes_to_copy, struct page *bv_page, unsigned long offset, u64 counter)
   {
 
     u64 start;
@@ -1150,7 +1180,7 @@ static s32 add_bio_segment_to_concurrent_operation_entry(zosbd2_context *context
 
     start = (u64)start_sector * (u64)KERNEL_SECTOR_SIZE; 
 
-    bio_segment_op_state->bv_page = bv_page;
+    bio_segment_op_state->bv_page = bv_page; 
     bio_segment_op_state->offset = offset;
     bio_segment_op_state->request_start = start;
     bio_segment_op_state->request_length = bytes_to_copy;
@@ -1183,6 +1213,13 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
     int dir;
     unsigned long start_time;
 
+    if (bio == NULL)
+      {
+        log_kern_error(-EINVAL, "bio_request_handler: bio is null.");
+        block_ret = -EINVAL;
+        goto errornodevice;
+      }
+
     total_bytes_to_transfer = bio_sectors(bio) * KERNEL_SECTOR_SIZE;
     log_kern_debug("start bio_request_handler. total bytes to transfer: %d", total_bytes_to_transfer);
 
@@ -1200,25 +1237,25 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
         goto errornodevice;
       }
 
+    operation = bio_op(bio);
+    if ((operation != REQ_OP_READ) && (operation != REQ_OP_WRITE) && (operation != REQ_OP_DISCARD))
+      {
+        log_kern_error(-EINVAL, "bio operation is not read, write, or discard: %d", operation);
+        block_ret = -EINVAL;
+        goto error;
+      }
+
 #if HAVE_BLK_ALLOC_QUEUE_NODE == 1
-    disk_stats_start(bio->bi_disk->queue, bio, device->gendisk);
+        disk_stats_start(bio->bi_disk->queue, bio, device->gendisk);
 #else
-    disk_stats_start(q, bio, device->gendisk);
+        disk_stats_start(q, bio, device->gendisk);
 #endif
-    start_time = jiffies;
+        start_time = jiffies;
 
     if (atomic_read(&device->shutting_down) == STATE_FORCE_SHUTDOWN)
       {
         log_kern_error(-ESHUTDOWN, "device is being shut down can't accept new requests.");
         block_ret = -ESHUTDOWN;
-        goto error;
-      }
-
-    operation = bio_op(bio);
-    if ((operation != REQ_OP_READ) && (operation != REQ_OP_WRITE))
-      {
-        log_kern_error(-EINVAL, "bio operation is not read or write: %d", operation);
-        block_ret = -EINVAL;
         goto error;
       }
 
@@ -1237,8 +1274,37 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
         goto error; 
       }
 
+    context->dir = 0;
     dir = bio_data_dir(bio);
     context->dir = dir;
+    context->operation = operation;
+
+    if (operation == REQ_OP_DISCARD)
+      {
+
+        int bytes_to_transfer = bio->bi_iter.bi_size;
+        log_kern_debug("bio request: segment %d (max %d/%d), start %llu, segment length %d, total bytes in this request %d, discard",
+                       segments_in_this_concurrent_operation_entry+1, device->max_segments_per_request, MAX_BIO_SEGMENTS_PER_REQUEST,
+                       (u64)bio->bi_iter.bi_sector * KERNEL_SECTOR_SIZE, bio->bi_iter.bi_size, buffer_size_tally + bytes_to_transfer);
+
+        segments_in_this_concurrent_operation_entry++; 
+        segments_in_entire_bio++; 
+        buffer_size_tally += bytes_to_transfer;
+
+        block_ret = add_bio_segment_to_concurrent_operation_entry(context, device, bio->bi_iter.bi_sector, bio->bi_iter.bi_size, NULL, 0, segments_in_this_concurrent_operation_entry);
+
+        if (block_ret != 0)
+          {
+
+            log_kern_error(block_ret, "Error adding discard segment to concurrent_operation entry. ending bio with failure.");
+            goto error;
+          }
+
+        context->total_data_in_all_segments = buffer_size_tally;
+        context->number_of_segments_in_list = segments_in_this_concurrent_operation_entry;
+
+        goto complete;
+      }
 
     bio_for_each_segment(bvec, bio, iter)
       {
@@ -1305,8 +1371,10 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
 
       } 
 
+    complete: 
+
     if (block_ret != 0)
-        goto error;
+      goto error;
 
     if (list_empty(&context->bio_segments_op_state_list) == 0)
       {
@@ -1328,9 +1396,9 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
     error:
 
 #if HAVE_BLK_ALLOC_QUEUE_NODE == 1
-    disk_stats_end(bio->bi_disk->queue, bio, device->gendisk, start_time);
+        disk_stats_end(bio->bi_disk->queue, bio, device->gendisk, start_time);
 #else
-    disk_stats_end(q, bio, device->gendisk, start_time);
+        disk_stats_end(q, bio, device->gendisk, start_time);
 #endif
 
     device_put(device); 
@@ -1846,6 +1914,23 @@ static s32 ioctl_block_device_create(unsigned long __user userspace)
 
     new_device->gendisk->flags = GENHD_FL_NO_PART_SCAN;
     new_device->gendisk->private_data = new_device;
+
+    new_device->gendisk->queue->limits.discard_granularity = PAGE_SIZE;
+    new_device->gendisk->queue->limits.max_discard_sectors = MAX_BIO_SEGMENTS_PER_REQUEST; 
+    new_device->gendisk->queue->limits.max_discard_segments = MAX_BIO_SEGMENTS_PER_REQUEST; 
+    new_device->gendisk->queue->limits.max_hw_discard_sectors = MAX_BIO_SEGMENTS_PER_REQUEST; 
+
+    new_device->gendisk->queue->limits.alignment_offset = new_device->gendisk->queue->limits.physical_block_size;;
+    log_kern_debug("max discard sectors %d", new_device->gendisk->queue->limits.max_discard_sectors);
+    log_kern_debug("max discard segments %d", new_device->gendisk->queue->limits.max_discard_segments);
+    log_kern_debug("max hw discard sectors %d", new_device->gendisk->queue->limits.max_hw_discard_sectors);
+    log_kern_debug("discard granularity %d", new_device->gendisk->queue->limits.discard_granularity);
+    log_kern_debug("alignment offset %d", new_device->gendisk->queue->limits.alignment_offset);
+#if HAVE_BLK_QUEUE_FLAG_SET == 1
+    blk_queue_flag_set(QUEUE_FLAG_DISCARD, new_device->gendisk->queue);
+#else
+    queue_flag_set(QUEUE_FLAG_DISCARD, new_device->gendisk->queue);
+#endif
 
     strncpy(new_device->gendisk->disk_name, new_device->device_name, MAX_DEVICE_NAME_LENGTH);  
 

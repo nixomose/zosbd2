@@ -40,12 +40,14 @@
 #define DEVICE_OPERATION_NO_RESPONSE_BLOCK_FOR_REQUEST 30    
 #define DEVICE_OPERATION_READ_RESPONSE 31        
 #define DEVICE_OPERATION_WRITE_RESPONSE 37       
+#define DEVICE_OPERATION_DISCARD_RESPONSE 38     
 
 #define DEVICE_OPERATION_STATUS 39       
 
 #define DEVICE_OPERATION_KERNEL_BLOCK_FOR_REQUEST 40 
 #define DEVICE_OPERATION_KERNEL_READ_REQUEST 41
 #define DEVICE_OPERATION_KERNEL_WRITE_REQUEST 42
+#define DEVICE_OPERATION_KERNEL_DISCARD_REQUEST 43
 
 #define DEVICE_OPERATION_KERNEL_USERSPACE_EXIT 8086 
 
@@ -141,6 +143,19 @@ typedef struct
     u64 response_total_length_of_all_segment_requests_written; 
 } write_response_param_t;
 
+typedef struct
+{
+
+  u64 total_length_of_all_bio_segments;
+  u32 number_of_segments;
+
+} discard_request_param_t;
+
+typedef struct
+{
+    u64 response_total_length_of_all_segment_requests_discarded;
+} discard_response_param_t;
+
 typedef union
 {
     read_request_param_t read_request;
@@ -148,6 +163,9 @@ typedef union
 
     write_request_param_t write_request;
     write_response_param_t write_response;
+
+    discard_request_param_t discard_request;
+    discard_response_param_t discard_response;
 } zosbd2_packet;
 
 typedef struct

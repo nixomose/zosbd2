@@ -20,6 +20,7 @@ typedef struct zosbd2_context_t
 
     struct list_head bio_segments_op_state_list;
     int dir; 
+    int operation; 
     u64 total_data_in_all_segments; 
     u32 number_of_segments_in_list; 
 
