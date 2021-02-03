@@ -202,6 +202,18 @@ class libzosbd2
         return Ret::r();
       }
 
+    int discard_block(u64 start_in_bytes, u64 length)
+      {
+        while (length > 0)
+          {
+            ramdisk.erase(start_in_bytes);
+            start_in_bytes += 4096;
+            length -= 4096;
+          }
+        return Ret::r();
+      }
+
+
     int respond_to_read_request(int fd, u32 handle_id, zosbd2_operation &requestop)
       {
         int retval = validate_read_request(handle_id, requestop);
@@ -333,6 +345,71 @@ class libzosbd2
         return Ret::r();
       }
 
+    int respond_to_discard_request(int fd, u32 handle_id, zosbd2_operation &requestop)
+      {
+        i32 error = 0;
+
+        u32 operation_id = requestop.operation_id;
+        u64 number_of_segments = requestop.packet.discard_request.number_of_segments;
+
+        zosbd2_operation &responseop = requestop;
+        responseop.handle_id = handle_id;
+        responseop.operation_id = operation_id;
+        responseop.error = error;
+        responseop.header.operation = DEVICE_OPERATION_DISCARD_RESPONSE;
+        responseop.header.size = 0;
+
+        int ret = Ret::r();
+        unsigned char *userspacedatabufferpos = requestop.userspacedatabuffer;
+        u64 total_buffer_size_tally = 0;
+
+        bool verify_start_first = true;
+        u64 verify_start = 0;
+        u64 entire_start = 0;
+        u32 entire_length = 0;
+
+        for (u32 lp = 0; lp < number_of_segments; lp++)
+          {
+            zosbd2_bio_segment_metadata *entry = &requestop.metadata[lp];
+            u64 start = entry->start;
+            u64 length = entry->length;
+
+            if (verify_start_first == true)
+              {
+                verify_start_first = false;
+                verify_start = start;
+                entire_start = start;
+              }
+            else if (verify_start != start)
+              return Ret::r(-EINVAL, "respond_to_write_request segments are not contiguous, expected start %lld got start %lld", verify_start, start);
+
+            verify_start += length;
+            entire_length += length;
+          }
+
+        total_buffer_size_tally += entire_length;
+
+        int retval = discard_block(entire_start, entire_length);
+        if (retval != 0)
+          {
+            retval = Ret::r(retval, "Error from storage.discard_block, error: %d", retval);
+            responseop.error = retval;
+
+            goto error;
+          }
+
+        responseop.header.size = 0;
+        responseop.packet.discard_response.response_total_length_of_all_segment_requests_discarded = total_buffer_size_tally;
+
+        error:
+
+        retval = safe_ioctl(fd, IOCTL_DEVICE_OPERATION, &responseop);
+        if (retval != 0)
+          return Ret::r(retval, "ioctl call failed for device operation discard response, err %d", retval);
+
+        return Ret::r();
+      }
+
     int run_block_for_request(int fd, zosbd2_operation &op)
       {
         while (true)
@@ -411,6 +488,11 @@ class libzosbd2
               case DEVICE_OPERATION_KERNEL_WRITE_REQUEST:
                 {
                   retval = respond_to_write_request(fd, m_block_device_handle_id, op);
+                  break;
+                }
+              case DEVICE_OPERATION_KERNEL_DISCARD_REQUEST:
+                {
+                  retval = respond_to_discard_request(fd, m_block_device_handle_id, op);
                   break;
                 }
               case DEVICE_OPERATION_KERNEL_USERSPACE_EXIT:
