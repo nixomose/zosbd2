@@ -22,7 +22,7 @@ raspbian:
 
 fedora:
 
-```sudo yum -y install kernel-devel kernel-headers```
+```sudo yum -y install kernel-devel-$(uname -r)```
 
 once the headers are installed, you can build the kernel module
 
