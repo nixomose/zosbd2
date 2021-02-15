@@ -38,7 +38,14 @@
 
 #define ZOSBD2_CONTROL_DEVICE_NAME "zosbd2ctl"
 
-#define KERNEL_SECTOR_SIZE 512 
+#ifndef SECTOR_SHIFT
+#define SECTOR_SHIFT 9
+#endif
+#ifndef SECTOR_SIZE
+#define SECTOR_SIZE (1 << SECTOR_SHIFT)
+#endif
+
+#define KERNEL_SECTOR_SIZE SECTOR_SIZE 
 
 #define STATE_RUNNING 0
 #define STATE_SHUTDOWN 1
@@ -1245,6 +1252,8 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
         goto error;
       }
 
+    if (operation != REQ_OP_DISCARD)
+      { 
 #if HAVE_BLK_ALLOC_QUEUE_NODE == 1
         disk_stats_start(bio->bi_disk->queue, bio, device->gendisk);
 #else
@@ -1252,11 +1261,12 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
 #endif
         start_time = jiffies;
 
-    if (atomic_read(&device->shutting_down) == STATE_FORCE_SHUTDOWN)
-      {
-        log_kern_error(-ESHUTDOWN, "device is being shut down can't accept new requests.");
-        block_ret = -ESHUTDOWN;
-        goto error;
+        if (atomic_read(&device->shutting_down) == STATE_FORCE_SHUTDOWN)
+          {
+            log_kern_error(-ESHUTDOWN, "device is being shut down can't accept new requests.");
+            block_ret = -ESHUTDOWN;
+            goto error;
+          }
       }
 
     buffer_size_tally = 0; 
@@ -1282,10 +1292,10 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
     if (operation == REQ_OP_DISCARD)
       {
 
-        int bytes_to_transfer = bio->bi_iter.bi_size;
-        log_kern_debug("bio request: segment %d (max %d/%d), start %llu, segment length %d, total bytes in this request %d, discard",
+        u64 bytes_to_transfer = bio->bi_iter.bi_size;
+        log_kern_debug("bio request: segment %d (max %d/%d), start %lld, segment length %lld, total bytes in this request %lld, discard",
                        segments_in_this_concurrent_operation_entry+1, device->max_segments_per_request, MAX_BIO_SEGMENTS_PER_REQUEST,
-                       (u64)bio->bi_iter.bi_sector * KERNEL_SECTOR_SIZE, bio->bi_iter.bi_size, buffer_size_tally + bytes_to_transfer);
+                       (u64)bio->bi_iter.bi_sector * (u64)KERNEL_SECTOR_SIZE, (u64)bio->bi_iter.bi_size, (u64)buffer_size_tally + (u64)bytes_to_transfer);
 
         segments_in_this_concurrent_operation_entry++; 
         segments_in_entire_bio++; 
@@ -1352,7 +1362,7 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
         log_kern_debug("bio request: segment %d (max %d/%d), start %llu, offset %lu, segment length %d, total bytes in this request %d, dir %d (%s)",
                        segments_in_this_concurrent_operation_entry+1, device->max_segments_per_request, MAX_BIO_SEGMENTS_PER_REQUEST,
                        (u64)sector * KERNEL_SECTOR_SIZE, offset, bytes_to_transfer, buffer_size_tally + bytes_to_transfer,
-                       dir, (dir == WRITE ? "write" : "read"));
+                       dir, ((operation == REQ_OP_DISCARD) ? "discard" : (dir == WRITE ? "write" : "read")));
 
         segments_in_this_concurrent_operation_entry++; 
         segments_in_entire_bio++; 
@@ -1395,11 +1405,14 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
 
     error:
 
+    if (operation != REQ_OP_DISCARD)
+      { 
 #if HAVE_BLK_ALLOC_QUEUE_NODE == 1
         disk_stats_end(bio->bi_disk->queue, bio, device->gendisk, start_time);
 #else
         disk_stats_end(q, bio, device->gendisk, start_time);
 #endif
+      }
 
     device_put(device); 
 
@@ -1820,6 +1833,7 @@ static s32 ioctl_block_device_create(unsigned long __user userspace)
 
     u64 bytes;
     u64 sectors;
+    sector_t sector_count;
     s32 retval = 0;
     u32 handle_id = 0;
     unsigned long copyret;
@@ -1915,12 +1929,16 @@ static s32 ioctl_block_device_create(unsigned long __user userspace)
     new_device->gendisk->flags = GENHD_FL_NO_PART_SCAN;
     new_device->gendisk->private_data = new_device;
 
+    sector_count = (MAX_BIO_SEGMENTS_PER_REQUEST * PAGE_SIZE) / KERNEL_SECTOR_SIZE;
+    blk_queue_max_discard_sectors(new_device->gendisk->queue, sector_count);
+    blk_queue_max_discard_segments(new_device->gendisk->queue, MAX_BIO_SEGMENTS_PER_REQUEST);
     new_device->gendisk->queue->limits.discard_granularity = PAGE_SIZE;
-    new_device->gendisk->queue->limits.max_discard_sectors = MAX_BIO_SEGMENTS_PER_REQUEST; 
-    new_device->gendisk->queue->limits.max_discard_segments = MAX_BIO_SEGMENTS_PER_REQUEST; 
+    new_device->gendisk->queue->limits.max_discard_sectors = sector_count;
+    new_device->gendisk->queue->limits.max_discard_segments = MAX_BIO_SEGMENTS_PER_REQUEST;
     new_device->gendisk->queue->limits.max_hw_discard_sectors = MAX_BIO_SEGMENTS_PER_REQUEST; 
 
-    new_device->gendisk->queue->limits.alignment_offset = new_device->gendisk->queue->limits.physical_block_size;;
+    new_device->gendisk->queue->limits.alignment_offset = 0; 
+
     log_kern_debug("max discard sectors %d", new_device->gendisk->queue->limits.max_discard_sectors);
     log_kern_debug("max discard segments %d", new_device->gendisk->queue->limits.max_discard_segments);
     log_kern_debug("max hw discard sectors %d", new_device->gendisk->queue->limits.max_hw_discard_sectors);
