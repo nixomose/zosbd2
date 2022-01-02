@@ -1651,6 +1651,32 @@ static s32 validate_create_params(device_state *new_device, control_block_device
     u32 count = 0;
     device_state *count_ptr;
 
+{
+        char out[120];
+        char *v = (char *)params;
+        memset(out, 0xff, 120);
+        hexdumpbuf   (out, v);
+        log_kern_debug("%s", out);
+
+        memset(out, 0xff, 120);
+        hexdumpbuf   (out, v+16);
+        log_kern_debug("%s", out);
+
+        memset(out, 0xff, 120);
+        hexdumpbuf   (out, v+32);
+        log_kern_debug("%s", out);
+
+        memset(out, 0xff, 120);
+        hexdumpbuf   (out, v+48);
+        log_kern_debug("%s", out);
+
+        log_kern_debug("block size:           %d", params->kernel_block_size);
+        log_kern_debug("segments per request: %d", params->max_segments_per_request);
+        log_kern_debug("number of blocks:     %lld", params->number_of_blocks);
+        log_kern_debug("timeout seconds:      %d", params->device_timeout_seconds);
+
+}
+
     new_device->kernel_block_size = params->kernel_block_size;
     if (new_device->kernel_block_size % 4096 != 0)
       {
@@ -2243,17 +2269,27 @@ static s32 ioctl_block_device_destroy_by_name(unsigned long __user userspace)
 static void sync_gendisk(struct gendisk *disk)
   {
     struct disk_part_iter piter;
-	  struct hd_struct *part;
 
+#if HAVE_HD_STRUCT == 1
+    struct hd_struct *part;
+#else
+    struct block_device *part;
+#endif
+	  
     disk_part_iter_init(&piter, disk, 0);
     while ((part = disk_part_iter_next(&piter))) {
       struct block_device *bdev = NULL;
-
-      bdev = bdget_disk(disk, part->partno);
+#if HAVE_HD_STRUCT == 1
+      u8 partno = part->partno;
+      bdev = bdget_disk(disk, partno);
       if (!bdev)
         continue;
+#else
+      u8 partno = part->bd_partno;
+      bdev = part;
+#endif
 
-      log_kern_info("syncing partition: %d", part->partno);
+      log_kern_info("syncing partition: %d", partno);
 
       fsync_bdev(bdev);
       bdput(bdev);
