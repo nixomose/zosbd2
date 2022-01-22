@@ -25,6 +25,7 @@
 #include <linux/stat.h>
 #include <linux/blk_types.h>
 #include <linux/genhd.h>
+#include <linux/errno.h>
 
 #include "zosbd2tools.h"
 #include "zosbd2.h"
@@ -448,6 +449,10 @@ static s32 zosbd2_operation_block_for_request(device_state *device, unsigned lon
 #else
                 int signal_number = kernel_dequeue_signal(); 
 #endif
+
+                if (signal_number == SIGURG)
+                  continue; 
+
                 if (signal_number > 0)
                   {
 
@@ -699,10 +704,91 @@ static s32 zosbd2_operation_discard_response(device_state *device, zosbd2_operat
     return zosbd2_operation_write_and_discard_common(0, device, op, userspace);
   }
 
-static s32 ioctl_zosbd2_device_status(struct block_device *bdev, fmode_t mode, unsigned long __user userspace)
+static s32 ioctl_control_device_list(unsigned long __user userspace)
   {
 
-    return -EOPNOTSUPP;
+	unsigned long copyret;
+    s32 retval = 0;
+    control_status_device_list_request_response response;
+    u32 device_count = 0;
+    device_state *device_ptr;
+
+    control_status_device_list_request_response *userspaceresponse = (control_status_device_list_request_response *)userspace;
+
+    log_user_debug("getting control device list");
+    pil_mutex_lock(&master_control_state.control_lock_mutex);
+    list_for_each_entry(device_ptr, &master_control_state.active_device_list, list_anchor)
+      {
+    	response.handleid[device_count] = device_ptr->handle_id;
+        log_user_debug("device %d handle_id %d", device_count, device_ptr->handle_id);
+        device_count++;
+      }
+    pil_mutex_unlock(&master_control_state.control_lock_mutex);
+
+    response.num_devices = device_count;
+
+    copyret = copy_to_user(userspaceresponse, &response, sizeof(control_status_device_list_request_response));
+    if (copyret != 0)
+      {
+        log_kern_error(-EINVAL, "unable to copy device list back to userspace.");
+        retval = -EINVAL;
+      }
+
+	return retval;
+  }
+
+static s32 ioctl_control_device_status(unsigned long __user userspace)
+  {
+
+	unsigned long copyret;
+    device_state *device = NULL;
+    control_status_device_request_response paramsresponse;  
+    s32 retval = 0;
+
+    control_status_device_request_response *userspaceparamsresponse = (control_status_device_request_response *)userspace;
+    log_user_debug("getting status for device");
+
+    copyret = copy_from_user(&paramsresponse, userspaceparamsresponse, sizeof(control_status_device_request_response));
+    if (copyret != 0)
+      {
+        log_kern_error(-EINVAL, "unable to copy parameters from userspace for device status.");
+        retval = -EINVAL;
+        goto error;
+      }
+
+    retval = find_device_by_handle_id(paramsresponse.handle_id_request, &device);
+    if (retval != 0)
+      {
+        log_kern_error(retval, "Unable to find handle_id %d in list of active devices, can't get status.", paramsresponse.handle_id_request);
+
+        goto error;
+      }
+
+    pil_mutex_lock(&device->device_state_lock_mutex);
+
+    paramsresponse.size = device->size;
+    paramsresponse.number_of_blocks = device->number_of_blocks;
+    paramsresponse.kernel_block_size = device->kernel_block_size;
+    paramsresponse.max_segments_per_request = device->max_segments_per_request;
+    paramsresponse.timeout_milliseconds = device->timeout_milliseconds;
+    paramsresponse.handle_id = device->handle_id;
+    strncpy(paramsresponse.device_name, device->device_name, MAX_DEVICE_NAME_LENGTH);
+    paramsresponse.device_name[MAX_DEVICE_NAME_LENGTH] = '\0'; 
+
+    pil_mutex_unlock(&device->device_state_lock_mutex);
+    log_user_debug("returning status for handle_id %d, device name %s", paramsresponse.handle_id_request, paramsresponse.device_name);
+
+    copyret = copy_to_user(userspaceparamsresponse, &paramsresponse, sizeof(control_status_device_request_response));
+    if (copyret != 0)
+      {
+        log_kern_error(-EINVAL, "unable to copy device status back to userspace.");
+        retval = -EINVAL;
+      }
+
+    device_put(device);
+
+    error:
+	return retval;
   }
 
 static s32 ioctl_zosbd2_operation(struct block_device *bdev, fmode_t mode, unsigned long __user userspace)
@@ -797,8 +883,6 @@ static int device_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cm
         log_user_debug("got ioctl_device_ping");
         ret = 0;
       }
-    else if (cmd == IOCTL_DEVICE_STATUS)
-      ret = ioctl_zosbd2_device_status(bdev, mode, userspace);
     else if (cmd == IOCTL_DEVICE_OPERATION)
       ret = ioctl_zosbd2_operation(bdev, mode, userspace);
     else
@@ -2498,11 +2582,17 @@ static long control_device_ioctl(struct file *f, unsigned int cmd, unsigned long
         log_kern_debug("got ioctl_control_ping");
         retval = 0;
       }
-    else if (cmd == IOCTL_CONTROL_STATUS)
+    else if (cmd == IOCTL_CONTROL_STATUS_DEVICE_LIST)
       {
 
-        log_kern_debug("got ioctl_control_status");
-        retval = -ENODATA;
+        log_kern_debug("got ioctl_control_status_device_list");
+        retval = ioctl_control_device_list(l);
+      }
+    else if (cmd == IOCTL_CONTROL_STATUS_DEVICE_STATUS)
+      {
+
+        log_kern_debug("got ioctl_control_status_device_status");
+        retval = ioctl_control_device_status(l);
       }
     else if (cmd == IOCTL_CONTROL_CREATE_DEVICE)
       {

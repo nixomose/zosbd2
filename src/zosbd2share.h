@@ -25,15 +25,16 @@
 #define MAX_BIO_SEGMENTS_BUFFER_SIZE_PER_REQUEST (MAX_BIO_SEGMENTS_PER_REQUEST * 4096) 
 
 #define IOCTL_CONTROL_PING 12  
-#define IOCTL_CONTROL_STATUS 20 
 #define IOCTL_CONTROL_CREATE_DEVICE 21 
 #define IOCTL_CONTROL_DESTROY_DEVICE_BY_ID 22 
 #define IOCTL_CONTROL_DESTROY_DEVICE_BY_NAME 23
 #define IOCTL_CONTROL_DESTROY_ALL_DEVICES 25
 #define IOCTL_CONTROL_GET_HANDLE_ID_BY_NAME 26
 
+#define IOCTL_CONTROL_STATUS_DEVICE_LIST 60 
+#define IOCTL_CONTROL_STATUS_DEVICE_STATUS 61 
+
 #define IOCTL_DEVICE_PING 53  
-#define IOCTL_DEVICE_STATUS 55  
 
 #define IOCTL_DEVICE_OPERATION 58 
 
@@ -100,12 +101,25 @@ typedef struct control_ping_t
 
   } control_ping;
 
-typedef struct control_status_t
-  {
+typedef struct control_status_device_list_request_response_t
+  { 
 
-    u32 all_devices; 
-    u32 handle_id;
-  } control_status;
+  	u32 num_devices;
+  	u32 handleid[CREATE_DEVICE_MAX_ACTIVE_BLOCK_DEVICES];
+  } control_status_device_list_request_response;
+
+typedef struct control_status_device_request_response_t
+  { 
+    u32 handle_id_request;
+
+	u64 size; 
+	u64 number_of_blocks; 
+	u32 kernel_block_size; 
+	u32 max_segments_per_request; 
+	u32 timeout_milliseconds; 
+	u32 handle_id; 
+	unsigned char device_name[MAX_DEVICE_NAME_LENGTH+1]; 
+  } control_status_device_request_response;
 
 typedef union
   {
@@ -115,7 +129,8 @@ typedef union
     control_block_device_destroy_all_params destroy_params_all;
     control_block_device_get_handle_id_by_name_params get_handle_id_params_by_name;
     control_ping ping_params;
-    control_status status_params;
+    control_status_device_list_request_response get_device_list;
+    control_status_device_request_response get_device_status;
   } control_operation;
 
 typedef struct
