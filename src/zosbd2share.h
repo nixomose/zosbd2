@@ -52,6 +52,10 @@
 
 #define DEVICE_OPERATION_KERNEL_USERSPACE_EXIT 8086 
 
+#define DEVICE_OPERATION_KERNEL_USERSPACE_SIGNAL 6502
+
+#define USERSPACE_SIGNAL_REQUEST_SHUTDOWN 86 
+
 typedef struct control_block_device_create_params_t
   {
 
@@ -171,6 +175,11 @@ typedef struct
     u64 response_total_length_of_all_segment_requests_discarded;
 } discard_response_param_t;
 
+typedef struct
+{
+	u32 signal_action;
+} userspace_signal_param_t;
+
 typedef union
 {
     read_request_param_t read_request;
@@ -181,6 +190,8 @@ typedef union
 
     discard_request_param_t discard_request;
     discard_response_param_t discard_response;
+
+    userspace_signal_param_t userspace_signal;
 } zosbd2_packet;
 
 typedef struct

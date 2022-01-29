@@ -25,6 +25,11 @@ $(info HAVE_BLK_QUEUE_FLAG_SET = ${HAVE_BLK_QUEUE_FLAG_SET})
 HAVE_HD_STRUCT                 := $(shell /bin/bash -c 'grep "struct hd_struct"      /usr/src/linux-headers-`uname -r`/include/linux/genhd.h > /dev/null; echo $$(( 1 - $$? ))')
 $(info HAVE_HD_STRUCT = ${HAVE_HD_STRUCT})
 
+HAVE_BIO_BI_BDEV               := $(shell /bin/bash -c 'grep "struct.*block_device.*bi_bdev" /usr/src/linux-headers-`uname -r`/include/linux/blk_types.h > /dev/null; echo $$(( 1 - $$? ))')
+$(info HAVE_BIO_BI_BDEV = ${HAVE_BIO_BI_BDEV})
+
+HAVE_DISK_PART_ITER            := $(shell /bin/bash -c 'grep "disk_part_iter" /usr/src/linux-headers-`uname -r`/include/linux/genhd.h > /dev/null; echo $$(( 1 - $$? ))')
+$(info HAVE_DISK_PART_ITER = ${HAVE_DISK_PART_ITER})
 
 obj-m += zosbd2.o
 zosbd2-y := zosbd2tools.o zosbd2main.o
@@ -35,6 +40,9 @@ MY_CFLAGS += -DHAVE_BIO_START_IO_ACCT=${HAVE_BIO_START_IO_ACCT}
 MY_CFLAGS += -DHAVE_BLK_ALLOC_QUEUE_NODE=${HAVE_BLK_ALLOC_QUEUE_NODE}
 MY_CFLAGS += -DHAVE_BLK_QUEUE_FLAG_SET=${HAVE_BLK_QUEUE_FLAG_SET}
 MY_CFLAGS += -DHAVE_HD_STRUCT=${HAVE_HD_STRUCT}
+MY_CFLAGS += -DHAVE_BIO_BI_BDEV=${HAVE_BIO_BI_BDEV}
+MY_CFLAGS += -DHAVE_DISK_PART_ITER=${HAVE_DISK_PART_ITER}
+
 ccflags-y += ${MY_CFLAGS} -O2
 ccflags-y += -DBUILD_VERSION=\"$(BUILD_VERSION)\"
 

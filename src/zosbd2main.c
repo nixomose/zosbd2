@@ -54,7 +54,7 @@
 
 static int max_minors = 255; 
 
-static int debug_logs = 0; 
+static int debug_logs = 0;
 
 static int data_interrogation = 0; 
 
@@ -704,6 +704,51 @@ static s32 zosbd2_operation_discard_response(device_state *device, zosbd2_operat
     return zosbd2_operation_write_and_discard_common(0, device, op, userspace);
   }
 
+static s32 zosbd2_operation_userspace_signal(device_state *device, zosbd2_operation *op, u32 signal_type, unsigned long __user userspace)
+  {
+	
+
+	
+
+	zosbd2_context *context; 
+	s32 ret;
+
+	log_kern_debug("starting zosbd2_operation_userspace_signal.");
+
+	context = NULL;
+	log_kern_debug("creating concurrent entry to signal userspace for signal type: %d", signal_type);
+	ret = create_concurrent_operation_entry(device, &context);
+	if (ret != 0)
+	{
+		
+		log_kern_error(ret, "unable to create a concurrent operation entry in signal_userspace.");
+		return ret;
+	}
+
+	context->op.header.operation = DEVICE_OPERATION_KERNEL_USERSPACE_SIGNAL;
+
+	context->op.header.size = 0; 
+	context->op.header.signal_number = 0; 
+	
+	context->op.packet.userspace_signal.signal_action = signal_type;
+
+	
+	log_kern_debug("about to lock request_block_lock for signal userspace adding %u to unprocessed list", context->op.operation_id);
+	pil_mutex_lock(&device->request_block_lock); 
+	device->concurrent_list_unprocessed_count++; 
+	log_kern_debug("adding signal userspace concurrent entry unprocessed queue.");
+	
+	list_add_tail(&(context->list_anchor), &device->concurrent_operations_list);
+	log_kern_debug("broadcasting request_block_cv to ioctl thread and setting concurrent_list_unprocessed_count to %u", device->concurrent_list_unprocessed_count);
+	pil_cv_broadcast(&device->request_block_cv);
+	log_kern_debug("about to unlock request_block_lock");
+	pil_mutex_unlock(&device->request_block_lock);
+
+	
+	log_kern_debug("end of zosbd2_operation_userspace_signal, going back to block for another request");
+    return zosbd2_operation_block_for_request(device, userspace);
+  }
+
 static s32 ioctl_control_device_list(unsigned long __user userspace)
   {
 
@@ -848,6 +893,9 @@ static s32 ioctl_zosbd2_operation(struct block_device *bdev, fmode_t mode, unsig
       case DEVICE_OPERATION_DISCARD_RESPONSE:
         ret = zosbd2_operation_discard_response(device, holding_area, userspace);
         break;
+      case DEVICE_OPERATION_KERNEL_USERSPACE_SIGNAL:
+        ret = zosbd2_operation_userspace_signal(device, holding_area, USERSPACE_SIGNAL_REQUEST_SHUTDOWN, userspace); 
+        break;
       default:
         log_user_error(-EINVAL, "Unknown ioctl: %d", operation);
         ret = -EINVAL;
@@ -869,7 +917,7 @@ static int device_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cm
 
     s32 ret = 0;
     u32 logvalue;
-    log_user_debug("start zosbd2_ioctl");
+    log_user_debug("start device_ioctl");
     log_user_debug("Ioctl: type=%x number=%x  direction=%x  size=%x", _IOC_TYPE(cmd), _IOC_NR(cmd), _IOC_DIR(cmd), _IOC_SIZE(cmd));
 
     pil_mutex_lock(&master_control_state.control_lock_mutex);
@@ -898,7 +946,7 @@ static int device_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cm
     log_user_debug("exiting ioctl, userspace waiting count: %d", logvalue);
 
     log_user_debug("Ioctl end: type=%x number=%x  direction=%x  size=%x", _IOC_TYPE(cmd), _IOC_NR(cmd), _IOC_DIR(cmd), _IOC_SIZE(cmd));
-    log_user_debug("end zosbd2_ioctl");
+    log_user_debug("end device_ioctl");
 
     return ret;
   }
@@ -1344,7 +1392,11 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
 
     block_ret = 0;
 #if HAVE_BLK_ALLOC_QUEUE_NODE == 1
-    handle_id = (u32)(size_t)bio->bi_disk->queue->queuedata; 
+	#if HAVE_BIO_BI_BDEV == 1
+		handle_id = (u32)(size_t)bio->bi_bdev->bd_disk->queue->queuedata; 
+	#else
+		handle_id = (u32)(size_t)bio->bi_disk->queue->queuedata; 
+	#endif
 #else
     handle_id = (u32)(size_t)q->queuedata; 
 #endif
@@ -1367,7 +1419,11 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
     if (operation != REQ_OP_DISCARD)
       { 
 #if HAVE_BLK_ALLOC_QUEUE_NODE == 1
-        disk_stats_start(bio->bi_disk->queue, bio, device->gendisk);
+	#if HAVE_BIO_BI_BDEV == 1
+		disk_stats_start(bio->bi_bdev->bd_disk->queue, bio, device->gendisk);
+	#else
+    	disk_stats_start(bio->bi_disk->queue, bio, device->gendisk);
+	#endif
 #else
         disk_stats_start(q, bio, device->gendisk);
 #endif
@@ -1520,7 +1576,11 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
     if (operation != REQ_OP_DISCARD)
       { 
 #if HAVE_BLK_ALLOC_QUEUE_NODE == 1
-        disk_stats_end(bio->bi_disk->queue, bio, device->gendisk, start_time);
+	#if HAVE_BIO_BI_BDEV == 1
+		disk_stats_end(bio->bi_bdev->bd_disk->queue, bio, device->gendisk, start_time);
+	#else
+		disk_stats_end(bio->bi_disk->queue, bio, device->gendisk, start_time);
+	#endif
 #else
         disk_stats_end(q, bio, device->gendisk, start_time);
 #endif
@@ -1564,7 +1624,11 @@ static blk_qc_t bio_request_handler(struct request_queue *q, struct bio *bio)
     context = NULL;
     block_ret = 0;
 #if HAVE_BLK_ALLOC_QUEUE_NODE == 1
-    handle_id = (u32)(size_t)bio->bi_disk->queue->queuedata; 
+	#if HAVE_BIO_BI_BDEV == 1
+		handle_id = (u32)(size_t)bio->bi_bdev->bd_disk->queue->queuedata; 
+	#else
+		handle_id = (u32)(size_t)bio->bi_disk->queue->queuedata; 
+	#endif
 #else
     handle_id = (u32)(size_t)q->queuedata; 
 #endif
@@ -2352,6 +2416,9 @@ static s32 ioctl_block_device_destroy_by_name(unsigned long __user userspace)
 
 static void sync_gendisk(struct gendisk *disk)
   {
+    log_kern_info("sync_gendisk starting");
+
+#if HAVE_DISK_PART_ITER == 1
     struct disk_part_iter piter;
 
 #if HAVE_HD_STRUCT == 1
@@ -2379,6 +2446,31 @@ static void sync_gendisk(struct gendisk *disk)
       bdput(bdev);
     }
     disk_part_iter_exit(&piter);
+#else
+	{
+		
+		unsigned long idx;
+		struct block_device *part;
+
+		rcu_read_lock();
+		xa_for_each(&disk->part_tbl, idx, part)
+		{
+			if (!bdev_is_partition(part)) {
+				continue;
+			}
+			
+			bdgrab(part);
+			log_kern_info("syncing partition: %d", part->bd_partno);
+
+			
+			fsync_bdev(part);
+			bdput(part);
+		}
+		rcu_read_unlock();
+	}
+#endif
+
+    log_kern_info("sync_gendisk ending");
   }
 
 static s32 block_device_destroy(u32 handle_id, u32 force)
