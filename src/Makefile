@@ -31,6 +31,8 @@ $(info HAVE_BIO_BI_BDEV = ${HAVE_BIO_BI_BDEV})
 HAVE_DISK_PART_ITER            := $(shell /bin/bash -c 'grep "disk_part_iter" /usr/src/linux-headers-`uname -r`/include/linux/genhd.h > /dev/null; echo $$(( 1 - $$? ))')
 $(info HAVE_DISK_PART_ITER = ${HAVE_DISK_PART_ITER})
 
+HAVE_BLK_ALLOC_DISK            := $(shell /bin/bash -c 'grep "blk_alloc_disk" /usr/src/linux-headers-`uname -r`/include/linux/genhd.h > /dev/null; echo $$(( 1 - $$? ))')
+$(info HAVE_BLK_ALLOC_DISK = ${HAVE_BLK_ALLOC_DISK})
 obj-m += zosbd2.o
 zosbd2-y := zosbd2tools.o zosbd2main.o
 
@@ -42,6 +44,7 @@ MY_CFLAGS += -DHAVE_BLK_QUEUE_FLAG_SET=${HAVE_BLK_QUEUE_FLAG_SET}
 MY_CFLAGS += -DHAVE_HD_STRUCT=${HAVE_HD_STRUCT}
 MY_CFLAGS += -DHAVE_BIO_BI_BDEV=${HAVE_BIO_BI_BDEV}
 MY_CFLAGS += -DHAVE_DISK_PART_ITER=${HAVE_DISK_PART_ITER}
+MY_CFLAGS += -DHAVE_BLK_ALLOC_DISK=${HAVE_BLK_ALLOC_DISK}
 
 ccflags-y += ${MY_CFLAGS} -O2
 ccflags-y += -DBUILD_VERSION=\"$(BUILD_VERSION)\"

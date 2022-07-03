@@ -54,7 +54,7 @@
 
 static int max_minors = 255; 
 
-static int debug_logs = 0;
+static int debug_logs = 0; 
 
 static int data_interrogation = 0; 
 
@@ -174,7 +174,7 @@ static void block_device_cleanup(device_state *ending_device);
 
 static void disk_stats_start(struct request_queue *q, struct bio *bio, struct gendisk *gd);
 static void disk_stats_end(struct request_queue *q, struct bio *bio, struct gendisk *gd, unsigned long start_time);
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_QUEUE_NODE == 1 || HAVE_BLK_ALLOC_DISK == 1
 static blk_qc_t bio_request_handler(struct bio *bio);
 #endif
 static void device_get(device_state *device)
@@ -204,7 +204,7 @@ static void device_put(device_state *device)
 struct block_device_operations zosbd2_blk_dev_ops = {
     .owner         = THIS_MODULE,
     .open          = device_open,
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_QUEUE_NODE == 1 || HAVE_BLK_ALLOC_DISK == 1
     .submit_bio    = bio_request_handler,
 #endif
     .release       = device_release,
@@ -1358,7 +1358,7 @@ static s32 add_bio_segment_to_concurrent_operation_entry(zosbd2_context *context
     return 0;
   }
 
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_QUEUE_NODE == 1 || HAVE_BLK_ALLOC_DISK == 1
 static blk_qc_t bio_request_handler_II_the_handling(struct bio *bio)
 #else
 static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, struct bio *bio)
@@ -1391,7 +1391,7 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
     log_kern_debug("start bio_request_handler. total bytes to transfer: %d", total_bytes_to_transfer);
 
     block_ret = 0;
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_QUEUE_NODE == 1 || HAVE_BLK_ALLOC_DISK == 1
 	#if HAVE_BIO_BI_BDEV == 1
 		handle_id = (u32)(size_t)bio->bi_bdev->bd_disk->queue->queuedata; 
 	#else
@@ -1418,7 +1418,7 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
 
     if (operation != REQ_OP_DISCARD)
       { 
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_QUEUE_NODE == 1 || HAVE_BLK_ALLOC_DISK == 1
 	#if HAVE_BIO_BI_BDEV == 1
 		disk_stats_start(bio->bi_bdev->bd_disk->queue, bio, device->gendisk);
 	#else
@@ -1575,7 +1575,7 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
 
     if (operation != REQ_OP_DISCARD)
       { 
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_QUEUE_NODE == 1 || HAVE_BLK_ALLOC_DISK == 1
 	#if HAVE_BIO_BI_BDEV == 1
 		disk_stats_end(bio->bi_bdev->bd_disk->queue, bio, device->gendisk, start_time);
 	#else
@@ -1608,7 +1608,7 @@ static blk_qc_t bio_request_handler_II_the_handling(struct request_queue *q, str
     return BLK_QC_T_NONE;
   }
 
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_QUEUE_NODE == 1 || HAVE_BLK_ALLOC_DISK == 1
 static blk_qc_t bio_request_handler(struct bio *bio)
 #else
 static blk_qc_t bio_request_handler(struct request_queue *q, struct bio *bio)
@@ -1623,7 +1623,7 @@ static blk_qc_t bio_request_handler(struct request_queue *q, struct bio *bio)
 
     context = NULL;
     block_ret = 0;
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_QUEUE_NODE == 1 || HAVE_BLK_ALLOC_DISK == 1
 	#if HAVE_BIO_BI_BDEV == 1
 		handle_id = (u32)(size_t)bio->bi_bdev->bd_disk->queue->queuedata; 
 	#else
@@ -1642,7 +1642,7 @@ static blk_qc_t bio_request_handler(struct request_queue *q, struct bio *bio)
 
     if ((device->bio_segment_batch_queue_size == 0) || 1 )
       {
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_QUEUE_NODE == 1 || HAVE_BLK_ALLOC_DISK == 1
         bio_handler_ret =  bio_request_handler_II_the_handling(bio);
 #else
         bio_handler_ret = bio_request_handler_II_the_handling(q, bio);
@@ -2082,13 +2082,26 @@ static s32 ioctl_block_device_create(unsigned long __user userspace)
     handle_id = get_new_device_handle();
     new_device->handle_id = handle_id;
 
-#if HAVE_BLK_ALLOC_QUEUE_NODE == 1
+#if HAVE_BLK_ALLOC_DISK == 1
+
+    new_device->gendisk = blk_alloc_disk(NUMA_NO_NODE);
+    if (new_device->gendisk == NULL)
+      {
+        log_kern_error(-ENOMEM, "alloc_disk failure");
+        retval = -ENOMEM;
+        goto error;
+      }
+    new_device->gendisk->minors = max_minors; 
+    new_device->queue = new_device->gendisk->queue; 
+
+#elif HAVE_BLK_ALLOC_QUEUE_NODE == 1
     new_device->queue = blk_alloc_queue(NUMA_NO_NODE);
 #elif HAVE_COMBINED_BLK_ALLOC_QUEUE == 1
     new_device->queue = blk_alloc_queue(bio_request_handler, NUMA_NO_NODE);
 #else
     new_device->queue = blk_alloc_queue(GFP_KERNEL);
 #endif
+
     if (new_device->queue == NULL)
       {
         log_kern_error(-ENOMEM, "Unable to allocate request queue for new block device");
@@ -2096,7 +2109,7 @@ static s32 ioctl_block_device_create(unsigned long __user userspace)
         goto error;
       }
 
-#if HAVE_COMBINED_BLK_ALLOC_QUEUE == 0 && HAVE_BLK_ALLOC_QUEUE_NODE == 0
+#if HAVE_COMBINED_BLK_ALLOC_QUEUE == 0 && HAVE_BLK_ALLOC_QUEUE_NODE == 0 && HAVE_BLK_ALLOC_DISK == 0
     blk_queue_make_request(new_device->queue, bio_request_handler); 
 #endif
 
@@ -2115,6 +2128,8 @@ static s32 ioctl_block_device_create(unsigned long __user userspace)
     new_device->block_device_registered = 1;
     log_kern_info("zosbd2 major number %d", new_device->major);
 
+#if HAVE_BLK_ALLOC_DISK == 0 
+
     new_device->gendisk = alloc_disk(max_minors); 
     if (new_device->gendisk == NULL)
       {
@@ -2122,11 +2137,12 @@ static s32 ioctl_block_device_create(unsigned long __user userspace)
         retval = -ENOMEM;
         goto error;
       }
+    new_device->gendisk->queue = new_device->queue;
+#endif
 
     new_device->gendisk->major = new_device->major;
     new_device->gendisk->first_minor = 0;
     new_device->gendisk->fops = &zosbd2_blk_dev_ops;
-    new_device->gendisk->queue = new_device->queue;
 
     new_device->gendisk->flags = GENHD_FL_NO_PART_SCAN;
     new_device->gendisk->private_data = new_device;
@@ -2416,7 +2432,6 @@ static s32 ioctl_block_device_destroy_by_name(unsigned long __user userspace)
 
 static void sync_gendisk(struct gendisk *disk)
   {
-    log_kern_info("sync_gendisk starting");
 
 #if HAVE_DISK_PART_ITER == 1
     struct disk_part_iter piter;
@@ -2426,6 +2441,7 @@ static void sync_gendisk(struct gendisk *disk)
 #else
     struct block_device *part;
 #endif
+    log_kern_info("sync_gendisk starting");
 	  
     disk_part_iter_init(&piter, disk, 0);
     while ((part = disk_part_iter_next(&piter))) {
@@ -2447,6 +2463,7 @@ static void sync_gendisk(struct gendisk *disk)
     }
     disk_part_iter_exit(&piter);
 #else
+    log_kern_info("sync_gendisk starting");
 	{
 		
 		unsigned long idx;
@@ -2459,12 +2476,22 @@ static void sync_gendisk(struct gendisk *disk)
 				continue;
 			}
 			
+#if HAVE_BLK_ALLOC_DISK == 1
+			if (!kobject_get_unless_zero(&part->bd_device.kobj)) {
+				continue;
+			}
+#else
 			bdgrab(part);
+#endif
 			log_kern_info("syncing partition: %d", part->bd_partno);
 
 			
 			fsync_bdev(part);
+#if HAVE_BLK_ALLOC_DISK == 1
+			put_device(&part->bd_device);
+#else
 			bdput(part);
+#endif
 		}
 		rcu_read_unlock();
 	}
