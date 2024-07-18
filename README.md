@@ -110,9 +110,9 @@ there are a number of caveats and limitations that I'm still working on. it's a 
 
 it builds on 32 bit and 64 bit machines.
 
-it runs on raspbian and ubuntu 18.04 and 20.04
+it runs on raspbian and ubuntu 18.04, 20.04 and 22.04
 
-I've tested it with the 4.15 kernel and the 5.8 kernel and the 5.10 kernel.
+I've tested it with the 4.15 kernel and the 5.8 kernel and the 5.10 kernel and as of 7/2024 the 6.5 kernel.
 
 because of the way the sample program is written it can only handle one request at a time.
 all requests from the block device are handled roughly in the order in which they came in.
