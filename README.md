@@ -9,6 +9,8 @@ read more about zendemic and the zendemic object store here: http://zendemic.net
 
 Like other people, I have tried using nbd to create a block device with userspace software, but I had all sorts of problems with it, so this was my solution to the problem. This kernel module is tailored to the task and not a side effect that might be made to be workable.
 
+On 7/17/2024 I removed support for pre-5.19 kernels, you can still go back in the git history to get at older kernel support, but for a while I'll just keep 5.19+ kernels building.
+
 
 # building
 
