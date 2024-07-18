@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 /*
- * Copyright (C) 2020-2021 stu mark
+ * Copyright (C) 2020-2024 stu mark
  */
 #pragma once
 

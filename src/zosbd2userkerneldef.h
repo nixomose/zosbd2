@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /*
- * Copyright (C) 2020-2021 stu mark
+ * Copyright (C) 2020-2024 stu mark
  */
 #pragma once
 
@@ -28,7 +28,6 @@
 
   #else
 
-  #include <linux/genhd.h> 
 
 #endif
 
