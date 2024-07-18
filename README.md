@@ -97,7 +97,7 @@ the userspace application then handles the request either collecting the data fo
 
 the kernel module then sends the results sent from userspace to the kernel for the block device that the initial request came from and then blocks again waiting for something else to do.
 
-this cycle continues until an ioctl is make to the control device to destroy the block device.
+this cycle continues until an ioctl is made to the control device to destroy the block device.
 
 when a block device is destroyed, the kernel module sends a special response to the userspace blocking ioctl saying basically there are no more requests coming and the userspace program should not call back.
 
